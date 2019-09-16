@@ -35,7 +35,8 @@ const sketch = function(p) {
   let temperature = 0.25; // Controls the amount of uncertainty of the model.
   let modelLoaded = false;
   let modelIsActive = false;
-
+  let countStep = 0;
+  let stepTh = 2000; // Maximum drawing steps 
   let dx, dy; // Offsets of the pen strokes, in pixels.
   let x, y; // Absolute coordinates on the screen of where the pen is.
   let startX, startY;
@@ -59,7 +60,7 @@ const sketch = function(p) {
     const screenWidth = Math.floor(containerSize.width);
     const screenHeight = p.windowHeight / 2;
     p.createCanvas(screenWidth, screenHeight);
-    p.frameRate(60);
+    p.frameRate(4);
 
     restart();
     initModel(0);
@@ -147,16 +148,23 @@ const sketch = function(p) {
     }
     // New state.
     pen = previousPen;
+
+    if (pen[PEN.END] === 1){return;} // return if the stroke has ended
     modelState = model.update([dx, dy, ...pen], modelState);
     const pdf = model.getPDF(modelState, temperature);
     [dx, dy, ...pen] = model.sample(pdf);
 
     // If we finished the previous drawing, start a new one.
-    if (pen[PEN.END] === 1) {
-      initRNNStateFromStrokes(strokes);
+    if (pen[PEN.END] === 1 || countStep === stepTh) {
+      countStep = 0;
+      pen[PEN.END] = 1;
+      previousPen = pen;
+//    return;
+//    initRNNStateFromStrokes(strokes);
     } else {
       // Only draw on the paper if the pen is still touching the paper.
       if (previousPen[PEN.DOWN] === 1) {
+        countStep += 1;
         p.line(x, y, x+dx, y+dy); // Draw line connecting prev point to current point.
       }
       // Update.
@@ -221,6 +229,10 @@ const sketch = function(p) {
     });
   };
 
+  function initRNNEvent() {
+    initRNNStateFromStrokes(strokes);
+   }
+  
   function encodeStrokes(sequence) {
     if (sequence.length <= 5) {
       return;
@@ -278,7 +290,7 @@ const sketch = function(p) {
     p.stroke(p.color(p.random(64, 224), p.random(64, 224), p.random(64, 224)));
   };
 
-  function initDOMElements() {
+ function initDOMElements() {
     // Setup the DOM bits.
     textTemperature.textContent = inputTemperature.value = temperature;
 

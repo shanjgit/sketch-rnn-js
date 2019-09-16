@@ -50,7 +50,7 @@ const sketch = function(p) {
     const screenWidth = Math.floor(containerSize.width);
     const screenHeight = p.windowHeight / 2;
     p.createCanvas(screenWidth, screenHeight);
-    p.frameRate(60);
+    p.frameRate(4);
 
     setupNewDrawing();
     initModel(0);
