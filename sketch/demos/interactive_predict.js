@@ -36,7 +36,9 @@ const sketch = function(p) {
   let modelLoaded = false;
   let modelIsActive = false;
   let countStep = 0;
-  let stepTh = 2000; // Maximum drawing steps 
+  let stepTh = 300000; // Maximum RNN drawing steps
+  let countUserStep = 0;
+  let userStepTh = 20; // Maximum drawing steps for user
   let dx, dy; // Offsets of the pen strokes, in pixels.
   let x, y; // Absolute coordinates on the screen of where the pen is.
   let startX, startY;
@@ -57,10 +59,10 @@ const sketch = function(p) {
   p.setup = function() {
     const containerSize = document.getElementById('sketch').getBoundingClientRect();
     // Initialize the canvas.
-    const screenWidth = Math.floor(containerSize.width);
-    const screenHeight = p.windowHeight / 2;
+    const screenWidth = 480// Math.floor(containerSize.width);
+    const screenHeight = 480 //p.windowHeight / 2;
     p.createCanvas(screenWidth, screenHeight);
-    p.frameRate(4);
+    p.frameRate(5);
 
     restart();
     initModel(0);
@@ -85,8 +87,10 @@ const sketch = function(p) {
       p.stroke(p.color(255,0,0));  // User always draws in red.
     }
   }
+//  p.mouseReleased = function(){userPen = 0;  previousUserPen = userPen;}
 
-  p.mouseReleased = function () {
+
+  p.mouseReleased = function() {
     if (p.isInBounds()) {
       userPen = 0;  // Up!
 
@@ -116,9 +120,29 @@ const sketch = function(p) {
       }
       currentRawLine = [];
     }
-    modelIsActive = true;
+   modelIsActive = true; // uncommnet when using mouseReleased
     previousUserPen = userPen;
   }
+  
+  function linedash(x1, y1, x2, y2, delta, style = '-') {
+  // delta is both the length of a dash, the distance between 2 dots/dashes, and the diameter of a round
+  let distance = p.dist(x1,y1,x2,y2);
+  let dashNumber = distance/delta;
+  let xDelta = (x2-x1)/dashNumber;
+  let yDelta = (y2-y1)/dashNumber;
+
+  for (let i = 0; i < dashNumber; i+= 2) {
+    let xi1 = i*xDelta + x1;
+    let yi1 = i*yDelta + y1;
+    let xi2 = (i+1)*xDelta + x1;
+    let yi2 = (i+1)*yDelta + y1;
+
+    if (style == '-') { p.line(xi1, yi1, xi2, yi2); }
+    else if (style == '.') { p.point(xi1, yi1); }
+    else if (style == 'o') { p.ellipse(xi1, yi1, delta/2); }
+  }
+}
+
 
   p.mouseDragged = function () {
     if (!modelIsActive && p.isInBounds()) {
@@ -136,6 +160,8 @@ const sketch = function(p) {
         currentRawLine.push([x, y]);
       }
       previousUserPen = userPen;
+      //countUserStep += 1;
+      //if (countUserStep >= userStepTh){countUserStep = 0; p.giveTutorial()}
     }
   }
 
@@ -143,19 +169,20 @@ const sketch = function(p) {
   * Model is drawing.
   */
   p.draw = function() {
+     // || !modelIsActive
     if (!modelLoaded || !modelIsActive) {
       return;
     }
     // New state.
     pen = previousPen;
-
+    console.log(pen);
     if (pen[PEN.END] === 1){return;} // return if the stroke has ended
     modelState = model.update([dx, dy, ...pen], modelState);
     const pdf = model.getPDF(modelState, temperature);
     [dx, dy, ...pen] = model.sample(pdf);
 
     // If we finished the previous drawing, start a new one.
-    if (pen[PEN.END] === 1 || countStep === stepTh) {
+    if (pen[PEN.END] === 1 || countStep === stepTh || (previousPen[PEN.DOWN] === 1 && pen[PEN.DOWN] === 0)) {
       countStep = 0;
       pen[PEN.END] = 1;
       previousPen = pen;
@@ -165,8 +192,9 @@ const sketch = function(p) {
       // Only draw on the paper if the pen is still touching the paper.
       if (previousPen[PEN.DOWN] === 1) {
         countStep += 1;
-        p.line(x, y, x+dx, y+dy); // Draw line connecting prev point to current point.
-      }
+        // p.line(x, y, x+dx, y+dy); // Draw line connecting prev point to current point.
+        linedash(x, y, x+dx, y+dy, 2,'.')
+       }
       // Update.
       x += dx;
       y += dy;
@@ -214,6 +242,7 @@ const sketch = function(p) {
     if (model) {
       model.dispose();
     }
+    console.log('start init');
     model = new ms.SketchRNN(`${BASE_URL}${availableModels[index]}.gen.json`);
 
     Promise.all([model.initialize()]).then(function() {
@@ -257,7 +286,7 @@ const sketch = function(p) {
     dy = s[1];
     previousPen = [s[2], s[3], s[4]];
 
-    modelIsActive = true;
+    modelIsActive = true; // true in normal mode!!!
   }
 
   // This is very similar to the p.draw() loop, but instead of
