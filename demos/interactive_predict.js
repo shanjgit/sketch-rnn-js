@@ -23,11 +23,12 @@
  */
 
 import * as ms from '../src/index';
+import * as tf from '@tensorflow/tfjs-core';
 
 const sketch = function(p) {
   // Available SketchRNN models.
-  const BASE_URL = 'https://storage.googleapis.com/quickdraw-models/sketchRNN/models/';
-  const availableModels = ['bird', 'ant','ambulance','angel','alarm_clock','antyoga','backpack','barn','basket','bear','bee','beeflower','bicycle','book','brain','bridge','bulldozer','bus','butterfly','cactus','calendar','castle','cat','catbus','catpig','chair','couch','crab','crabchair','crabrabbitfacepig','cruise_ship','diving_board','dog','dogbunny','dolphin','duck','elephant','elephantpig','everything','eye','face','fan','fire_hydrant','firetruck','flamingo','flower','floweryoga','frog','frogsofa','garden','hand','hedgeberry','hedgehog','helicopter','kangaroo','key','lantern','lighthouse','lion','lionsheep','lobster','map','mermaid','monapassport','monkey','mosquito','octopus','owl','paintbrush','palm_tree','parrot','passport','peas','penguin','pig','pigsheep','pineapple','pool','postcard','power_outlet','rabbit','rabbitturtle','radio','radioface','rain','rhinoceros','rifle','roller_coaster','sandwich','scorpion','sea_turtle','sheep','skull','snail','snowflake','speedboat','spider','squirrel','steak','stove','strawberry','swan','swing_set','the_mona_lisa','tiger','toothbrush','toothpaste','tractor','trombone','truck','whale','windmill','yoga','yogabicycle'];
+  const BASE_URL = 'https://storage.googleapis.com/clouddatawu/';
+  const availableModels = ['dog','bird', 'ant','ambulance','angel','alarm_clock','antyoga','backpack','barn','basket','bear','bee','beeflower','bicycle','book','brain','bridge','bulldozer','bus','butterfly','cactus','calendar','castle','cat','catbus','catpig','chair','couch','crab','crabchair','crabrabbitfacepig','cruise_ship','diving_board','dogbunny','dolphin','duck','elephant','elephantpig','everything','eye','face','fan','fire_hydrant','firetruck','flamingo','flower','floweryoga','frog','frogsofa','garden','hand','hedgeberry','hedgehog','helicopter','kangaroo','key','lantern','lighthouse','lion','lionsheep','lobster','map','mermaid','monapassport','monkey','mosquito','octopus','owl','paintbrush','palm_tree','parrot','passport','peas','penguin','pig','pigsheep','pineapple','pool','postcard','power_outlet','rabbit','rabbitturtle','radio','radioface','rain','rhinoceros','rifle','roller_coaster','sandwich','scorpion','sea_turtle','sheep','skull','snail','snowflake','speedboat','spider','squirrel','steak','stove','strawberry','swan','swing_set','the_mona_lisa','tiger','toothbrush','toothpaste','tractor','trombone','truck','whale','windmill','yoga','yogabicycle'];
   let model;
 
   // Model state.
@@ -46,6 +47,7 @@ const sketch = function(p) {
   let previousUserPen = 0;
   let pen = [0,0,0]; // Current pen state, [pen_down, pen_up, pen_end].
   let previousPen = [1, 0, 0]; // Previous pen state.
+  let latentZ; // letent variable z extracted by encoder from a image 
   const PEN = {DOWN: 0, UP: 1, END: 2};
   const epsilon = 2.0; // to ignore data from user's pen staying in one spot.
 
@@ -59,8 +61,8 @@ const sketch = function(p) {
   p.setup = function() {
     const containerSize = document.getElementById('sketch').getBoundingClientRect();
     // Initialize the canvas.
-    const screenWidth = Math.floor(containerSize.width);
-    const screenHeight = p.windowHeight / 2;
+    const screenWidth = 480// Math.floor(containerSize.width);
+    const screenHeight = 480 //p.windowHeight / 2;
     p.createCanvas(screenWidth, screenHeight);
     p.frameRate(5);
 
@@ -177,8 +179,17 @@ const sketch = function(p) {
     pen = previousPen;
 
     if (pen[PEN.END] === 1){return;} // return if the stroke has ended
-    modelState = model.update([dx, dy, ...pen], modelState);
-    const pdf = model.getPDF(modelState, temperature);
+    modelState = update([dx, dy, ...pen], modelState, latentZ);
+    const NOUT = model.getNMIXTURE();
+    const out_o = tf.tidy(()=>{
+    const numUnits = model.numUnits;
+    const h = tf.tensor3d(modelState.h, [1, 1, numUnits]);
+    const out = model.output_model.predict(h);
+    return out.reshape([1, 6*NOUT+3]);
+    
+});
+    const pdf = model.getPDF(out_o, temperature);
+    out_o.dispose();
     [dx, dy, ...pen] = model.sample(pdf);
 
     // If we finished the previous drawing, start a new one.
@@ -242,7 +253,9 @@ const sketch = function(p) {
     if (model) {
       model.dispose();
     }
-    model = new ms.SketchRNN(`${BASE_URL}${availableModels[index]}.gen.json`);
+    console.log('start init?');
+    console.log(`${BASE_URL}${availableModels[index]}`);
+    model = new ms.SketchRNN(`${BASE_URL}${availableModels[index]}`);
 
     Promise.all([model.initialize()]).then(function() {
       modelLoaded = true;
@@ -251,6 +264,11 @@ const sketch = function(p) {
       // Initialize the scale factor for the model. Bigger -> large outputs
       model.setPixelFactor(5.0);
 
+      var imgTensor = tf.tensor(model.imgArray);
+      var out = model.encoder.predict(tf.expandDims(imgTensor,0));
+     
+      var sigma_exp = tf.exp(out[1].div(tf.scalar(2.0)));
+      latentZ = tf.add(out[0], sigma_exp.mul(tf.randomNormal(sigma_exp.shape, 0.0, 1.0)));
       if (strokes.length > 0) {
         initRNNStateFromStrokes(strokes);
       }
@@ -260,6 +278,99 @@ const sketch = function(p) {
   function initRNNEvent() {
     initRNNStateFromStrokes(strokes);
    }
+ 
+
+
+/**
+   * Updates the RNN, returns the next state.
+   *
+   * @param stroke [dx, dy, penDown, penUp, penEnd].
+   * @param state previous LSTMState.
+   *
+   * @returns next LSTMState.
+   */
+function  update(stroke, state,z) {
+    const out = tf.tidy(() => {
+      const numUnits = model.numUnits;
+      const s = model.scaleFactor;
+      const normStroke =
+        [stroke[0]/s, stroke[1]/s, stroke[2], stroke[3], stroke[4]];
+      const x = tf.tensor3d(normStroke, [1, 1, 5]);
+      const c = tf.tensor2d(state.c, [1, numUnits]);
+      const h = tf.tensor2d(state.h, [1, numUnits]);
+      const newState = model.decoder.predict([x, h, c, z]);
+      return newState[1].concat(newState[2], 1);
+    });
+    const newCH = out.dataSync();
+    out.dispose();
+    const newH = newCH.slice(0, model.numUnits);
+    const newC = newCH.slice(model.numUnits, model.numUnits * 2);
+    const finalState = model.zeroState();
+    finalState.c = Array.from(newC);
+    finalState.h = Array.from(newH);
+    return finalState;
+  }
+   
+
+  /**
+   * Updates the RNN on a series of Strokes, returns the next state.
+   *
+   * @param strokes list of [dx, dy, penDown, penUp, penEnd].
+   * @param state previous LSTMState.
+   * @param steps (Optional) number of steps of the stroke to update
+   * (default is length of strokes list)
+   * 
+   *
+   * @returns the final LSTMState.
+   */
+ function updateStrokes(strokes, state, steps, z) {
+    const out = tf.tidy(() => {
+      const numUnits = model.numUnits;
+      const s = model.scaleFactor;
+      let normStroke;
+      let x;
+      let c;
+      let h;
+      let newState;
+      let numSteps = strokes.length;
+      if (steps) {
+        numSteps = steps;
+      }
+      c = tf.tensor2d(state.c, [1, numUnits]);
+      h = tf.tensor2d(state.h, [1, numUnits]);
+      for (let i=0;i<numSteps;i++) {
+      normStroke = [strokes[i][0]/s,
+                      strokes[i][1]/s,
+                      strokes[i][2],
+                      strokes[i][3],
+                      strokes[i][4]];
+        x = tf.tensor3d(normStroke, [1, 1, 5]);
+        newState = model.decoder.predict([x, h, c, z])
+        c = newState[2];
+        h = newState[1];
+      }
+      return h.concat(c, 1);
+    });
+    const newHC = out.dataSync();
+    out.dispose();
+    const newH = newHC.slice(0, model.numUnits);
+    const newC = newHC.slice(model.numUnits, model.numUnits * 2);
+    const finalState = model.zeroState();
+    finalState.h = Array.from(newH);
+    finalState.c = Array.from(newC);
+    return finalState;
+  }
+
+  function splitAndMakeLSTMState(state) {
+      const newHC = out.dataSync();
+      const newH = newHC.slice(0, model.numUnits);
+      const newC = newHC.slice(model.numUnits, model.numUnits * 2);
+      const finalState = model.zeroState();
+      finalState.h = Array.from(newH);
+      finalState.c = Array.from(newC);
+      return finalState;
+}
+
   
   function encodeStrokes(sequence) {
     if (sequence.length <= 5) {
@@ -268,8 +379,14 @@ const sketch = function(p) {
 
     // Encode the strokes in the model.
     let newState = model.zeroState();
-    newState = model.update(model.zeroInput(), newState);
-    newState = model.updateStrokes(sequence, newState, sequence.length-1);
+    const newS = model.z_to_init.predict(latentZ);
+    const newHC = newS.dataSync();
+    const newH = newHC.slice(0, model.numUnits);
+    const newC = newHC.slice(model.numUnits, model.numUnits * 2);
+    newState.h = Array.from(newH);
+    newState.c = Array.from(newC);
+    newState = update(model.zeroInput(), newState, latentZ);
+    newState = updateStrokes(sequence, newState, sequence.length-1, latentZ);
 
     // Reset the actual model we're using to this one that has the encoded strokes.
     modelState = model.copyState(newState);
