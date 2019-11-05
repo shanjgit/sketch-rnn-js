@@ -191,9 +191,9 @@ const sketch = function(p) {
     const pdf = model.getPDF(out_o, temperature);
     out_o.dispose();
     [dx, dy, ...pen] = model.sample(pdf);
-
+     // (previousPen[PEN.DOWN] === 1 && pen[PEN.DOWN] === 0)
     // If we finished the previous drawing, start a new one.
-    if (pen[PEN.END] === 1 || countStep === stepTh || (previousPen[PEN.DOWN] === 1 && pen[PEN.DOWN] === 0)) {
+    if (pen[PEN.END] === 1 || countStep === stepTh) {
       countStep = 0;
       pen[PEN.END] = 1;
       previousPen = pen;
