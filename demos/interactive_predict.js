@@ -28,7 +28,7 @@ import * as tf from '@tensorflow/tfjs-core';
 const sketch = function(p) {
   // Available SketchRNN models.
   const BASE_URL = 'https://storage.googleapis.com/clouddatawu/';
-  const availableModels = ['dog','bird', 'ant','ambulance','angel','alarm_clock','antyoga','backpack','barn','basket','bear','bee','beeflower','bicycle','book','brain','bridge','bulldozer','bus','butterfly','cactus','calendar','castle','cat','catbus','catpig','chair','couch','crab','crabchair','crabrabbitfacepig','cruise_ship','diving_board','dogbunny','dolphin','duck','elephant','elephantpig','everything','eye','face','fan','fire_hydrant','firetruck','flamingo','flower','floweryoga','frog','frogsofa','garden','hand','hedgeberry','hedgehog','helicopter','kangaroo','key','lantern','lighthouse','lion','lionsheep','lobster','map','mermaid','monapassport','monkey','mosquito','octopus','owl','paintbrush','palm_tree','parrot','passport','peas','penguin','pig','pigsheep','pineapple','pool','postcard','power_outlet','rabbit','rabbitturtle','radio','radioface','rain','rhinoceros','rifle','roller_coaster','sandwich','scorpion','sea_turtle','sheep','skull','snail','snowflake','speedboat','spider','squirrel','steak','stove','strawberry','swan','swing_set','the_mona_lisa','tiger','toothbrush','toothpaste','tractor','trombone','truck','whale','windmill','yoga','yogabicycle'];
+  const availableModels = ['dog','bird'] //, 'ant','ambulance','angel','alarm_clock','antyoga','backpack','barn','basket','bear','bee','beeflower','bicycle','book','brain','bridge','bulldozer','bus','butterfly','cactus','calendar','castle','cat','catbus','catpig','chair','couch','crab','crabchair','crabrabbitfacepig','cruise_ship','diving_board','dogbunny','dolphin','duck','elephant','elephantpig','everything','eye','face','fan','fire_hydrant','firetruck','flamingo','flower','floweryoga','frog','frogsofa','garden','hand','hedgeberry','hedgehog','helicopter','kangaroo','key','lantern','lighthouse','lion','lionsheep','lobster','map','mermaid','monapassport','monkey','mosquito','octopus','owl','paintbrush','palm_tree','parrot','passport','peas','penguin','pig','pigsheep','pineapple','pool','postcard','power_outlet','rabbit','rabbitturtle','radio','radioface','rain','rhinoceros','rifle','roller_coaster','sandwich','scorpion','sea_turtle','sheep','skull','snail','snowflake','speedboat','spider','squirrel','steak','stove','strawberry','swan','swing_set','the_mona_lisa','tiger','toothbrush','toothpaste','tractor','trombone','truck','whale','windmill','yoga','yogabicycle'];
   let model;
 
   // Model state.
@@ -61,8 +61,8 @@ const sketch = function(p) {
   p.setup = function() {
     const containerSize = document.getElementById('sketch').getBoundingClientRect();
     // Initialize the canvas.
-    const screenWidth = 480// Math.floor(containerSize.width);
-    const screenHeight = 480 //p.windowHeight / 2;
+    const screenWidth = 512// Math.floor(containerSize.width);
+    const screenHeight = 512 //p.windowHeight / 2;
     p.createCanvas(screenWidth, screenHeight);
     p.frameRate(5);
 
@@ -247,8 +247,26 @@ const sketch = function(p) {
     p.background(255, 255, 255, 255);
     drawStrokes(strokes, startX, startY);
   }
+/**
+* High pass filtering the input image 
+* @param {imgIn}: [N, H, W, 1]
+* @return {imgOut}; [N, H, W, 1]
+*/
+function highPassFiltering(imgIn){
+    return tf.tidy(() => {
+      const shape = [3,3];
+      const type = 'float32';
+      const strides = [1,1];
+      const pad = 'same';
+      const filter = tf.tensor([[-1, -1, -1], [-1, 8, -1], [-1, -1, -1]], shape, type);
+      const filterHp = tf.expandDims(tf.expandDims(filter, -1), -1);
+      const imgOut = tf.conv2d(imgIn, filterHp, strides, pad);
+      return imgOut;
 
-  function initModel(index) {
+    });
+}
+ 
+ function initModel(index) {
     modelLoaded = false;
     if (model) {
       model.dispose();
@@ -262,9 +280,10 @@ const sketch = function(p) {
       console.log('SketchRNN model loaded.');
 
       // Initialize the scale factor for the model. Bigger -> large outputs
-      model.setPixelFactor(5.0);
+      model.setPixelFactor(2.8);
 
       var imgTensor = tf.tensor(model.imgArray);
+      // imgTensor = highPassFiltering(imgTensor)
       var out = model.encoder.predict(tf.expandDims(imgTensor,0));
      
       var sigma_exp = tf.exp(out[1].div(tf.scalar(2.0)));
@@ -437,20 +456,20 @@ function  update(stroke, state,z) {
 
  function initDOMElements() {
     // Setup the DOM bits.
-    textTemperature.textContent = inputTemperature.value = temperature;
+    // textTemperature.textContent = inputTemperature.value = temperature;
 
     // Listeners
     selectModels.innerHTML = availableModels.map(m => `<option>${m}</option>`).join('');
     selectModels.addEventListener('change', () => initModel(selectModels.selectedIndex));
-    inputTemperature.addEventListener('change', () => {
-      temperature = parseFloat(inputTemperature.value);
-      textTemperature.textContent = temperature;
-    });
+//    inputTemperature.addEventListener('change', () => {
+//      temperature = parseFloat(inputTemperature.value);
+//      textTemperature.textContent = temperature;
+//    });
     btnClear.addEventListener('click', restart)
-    btnRandom.addEventListener('click', () => {
-      selectModels.selectedIndex = Math.floor(Math.random() * availableModels.length);
-      initModel(selectModels.selectedIndex);
-    });
+//    btnRandom.addEventListener('click', () => {
+//      selectModels.selectedIndex = Math.floor(Math.random() * availableModels.length);
+//      initModel(selectModels.selectedIndex);
+//    });
   }
 };
 
